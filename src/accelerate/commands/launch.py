@@ -46,6 +46,17 @@ from accelerate.utils import (
 from accelerate.utils.constants import DEEPSPEED_MULTINODE_LAUNCHERS
 from accelerate.utils.dataclasses import SageMakerDistributedType
 
+from contextlib import closing
+import socket
+
+from datetime import datetime
+
+
+def get_open_port():
+    with closing(socket.socket(socket.AF_INET, socket.SOCK_STREAM)) as s:
+        s.bind(('', 0))
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        return s.getsockname()[1]
 
 if is_rich_available():
     from rich import get_console
@@ -408,9 +419,12 @@ def multi_gpu_launcher(args):
         else:
             setattr(args, "rdzv_endpoint", f"{main_process_ip}:{main_process_port}")
     else:
-        setattr(args, "nproc_per_node", str(num_processes))
+        # setattr(args, "nproc_per_node", str(num_processes))
+        setattr(args, "nproc_per_node", str(torch.cuda.device_count()))
         if main_process_port is not None:
             setattr(args, "master_port", str(main_process_port))
+        else:
+            setattr(args, "master_port", str(get_open_port()))
 
     if args.module and args.no_python:
         raise ValueError("--module and --no_python cannot be used together")
@@ -482,6 +496,11 @@ def multi_gpu_launcher(args):
 
     debug = getattr(args, "debug", False)
     args = _filter_args(args)
+
+    # add the current time to the training script args
+    args.training_script_args.append("--current_time")
+    args.training_script_args.append(str(datetime.now().strftime("%Y-%m-%d-%H:%M:%S.%f")))
+    
     with patch_environment(**current_env):
         try:
             distrib_run.run(args)
